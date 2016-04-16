@@ -1,0 +1,27 @@
+Update options:
+--initial_t arg            initial t value
+
+Feature options:
+--bit_precision            number of bits in the feature table
+
+Example options:
+  --testonly               Ignore label information and just test
+  --passes arg             Number of Training Passes
+  --loss_function arg      Specify the loss function to be used, uses 
+  (=squared)               squared by default. Currently available ones 
+                           are squared and logistic
+  --l1 arg                 l_1 lambda
+  --l2 arg                 l_2 lambda
+
+Output model:
+  --final_regressor arg    Final regressor
+  
+Output options:
+  --predictions arg        File to output predictions to
+  
+Reduction options:
+  --link arg (=identity)   Specify the link function: identity, logistic or glf1
+  
+Input options:
+  -d arg                   Example
+  

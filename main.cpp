@@ -260,6 +260,17 @@ void RunWithTextFile(ArgParcer::Inputs& i_inputs);
 
 int main(int argc, char* argv[])
 {
+  if (ArgParcer::cmdOptionExists(argv, argv + argc, "--help"))
+  {
+    std::ifstream infile("help.txt");
+    std::string input;
+    while (std::getline(infile, input))
+    {
+      print(input);
+    }
+    infile.close();
+    return 0;
+  }
   auto inputs = ArgParcer::GetInputs(argc, argv);
   if (inputs.d_inputPath.empty())
   {
