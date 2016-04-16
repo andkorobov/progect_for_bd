@@ -24,4 +24,6 @@ Reduction options:
   
 Input options:
   -d arg                   Example
+  --cache                  Use a cache.  The default is <data>.cache
+  --cache_file arg         The location(s) of cache_file.
   

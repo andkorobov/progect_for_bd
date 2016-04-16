@@ -153,6 +153,7 @@ struct Inputs
   bool d_testonly;
   std::string d_finalRegressor;
   std::string d_predictions;
+  std::string d_cacheFile;
   LinkType d_link;
 };
 
@@ -171,6 +172,7 @@ void print(const ArgParcer::Inputs& i_inputs)
       << "l2 = " << i_inputs.d_l2 << '\n'
       << "testonly = " << i_inputs.d_testonly << '\n'
       << "final_regressor = " << i_inputs.d_finalRegressor << '\n'
+      << "cache_file = " << i_inputs.d_cacheFile << '\n'
       << "predictions = " << i_inputs.d_predictions << '\n'
       << "link = " << ArgParcer::LinkTypeStr[i_inputs.d_link] << '\n';
 }
@@ -251,7 +253,23 @@ void DoStep(const ArgParcer::Inputs& i_inputs,
 	    Math::Type& io_lossSumPrev,
 	    size_t& io_prevCount);
 
-void RunWithTextFile(ArgParcer::Inputs& i_inputs);
+void PassWithTextFile(const ArgParcer::Inputs& i_inputs,
+		     std::ofstream& o_predictionsFile,
+		     Hashes& io_hashes,
+		     size_t& io_count,
+		     Math::Type& io_lossSum,
+		     Math::Type& io_lossSumPrev,
+		     size_t& io_prevCount);
+
+void PassWithCacheFile(const ArgParcer::Inputs& i_inputs,
+		       std::ofstream& o_predictionsFile,
+		       Hashes& io_hashes,
+		       size_t& io_count,
+		       Math::Type& io_lossSum,
+		       Math::Type& io_lossSumPrev,
+		       size_t& io_prevCount);
+
+void Run(ArgParcer::Inputs& i_inputs);
 } // namespace Learning
 
 //------------------------------------------------------------------------------------------------
@@ -276,7 +294,7 @@ int main(int argc, char* argv[])
   {
     return 1;
   }
-  Learning::RunWithTextFile(inputs);
+  Learning::Run(inputs);
   return 0;
 }
 
@@ -606,6 +624,12 @@ Inputs GetInputs(int argc, char* argv[])
   inputs.d_finalRegressor = getCmdOption(argv, argv + argc, "--final_regressor");
   inputs.d_predictions = getCmdOption(argv, argv + argc, "--predictions");
 
+  inputs.d_cacheFile = getCmdOption(argv, argv + argc, "--cache_file");
+  if (inputs.d_cacheFile.empty() && cmdOptionExists(argv, argv + argc, "--cache"))
+  {
+    inputs.d_cacheFile = inputs.d_inputPath + std::string(".cache");
+  }
+
   return inputs;
 }
 } // namespace ArgParcer
@@ -766,30 +790,128 @@ void Learning(Hashes& io_hashes,
   }
 }
 
+template <class T>
+void SimpleWriteToFile(std::ofstream& o_outfile, const T& i_value)
+{
+  o_outfile.write((char*)(&i_value), sizeof(T));
+}
+
+void WriteStringToFile(std::ofstream& o_outfile, const std::string& i_str)
+{
+  auto size = i_str.size();
+  o_outfile.write((char*)(&size), sizeof(size));
+  o_outfile.write(i_str.c_str(), size + 1);
+}
+
+template <class T>
+void WriteVectorToFile(std::ofstream& o_outfile, const std::vector<T>& i_vector)
+{
+  auto size = i_vector.size();
+  o_outfile.write((char*)(&size), sizeof(size));
+  o_outfile.write((char*)(&i_vector.front()), size * sizeof(T));
+}
+
+template <class T>
+void WriteNameMapToFile(std::ofstream& o_outfile,
+			const std::map<std::string, std::vector<T> >& i_map)
+{
+  auto size = i_map.size();
+  o_outfile.write((char*)(&size), sizeof(size));
+  for (const auto& pair : i_map)
+  {
+    WriteStringToFile(o_outfile, pair.first);
+    WriteVectorToFile(o_outfile, pair.second);
+  }
+}
+
 void WriteModel (const ArgParcer::Inputs& i_inputs,
 		 const Hashes& i_hashes,
 		 const std::string& i_fileName)
 {
   std::ofstream outfile (i_fileName, std::ofstream::binary);
-  outfile.write((char*)(&i_inputs.d_hashSize), sizeof(i_inputs.d_hashSize));
-  outfile.write((char*)(&i_inputs.d_l1), sizeof(i_inputs.d_l1));
-  outfile.write((char*)(&i_inputs.d_l2), sizeof(i_inputs.d_l2));
-  outfile.write((char*)(&i_inputs.d_lossFunction), sizeof(i_inputs.d_lossFunction));
-  outfile.write((char*)(&i_inputs.d_link), sizeof(i_inputs.d_link));
+  SimpleWriteToFile(outfile, i_inputs.d_hashSize);
+  SimpleWriteToFile(outfile, i_inputs.d_l1);
+  SimpleWriteToFile(outfile, i_inputs.d_l2);
+  SimpleWriteToFile(outfile, i_inputs.d_lossFunction);
+  SimpleWriteToFile(outfile, i_inputs.d_link);
 
-  auto hashSize = i_hashes.size();
-  outfile.write((char*)(&hashSize), sizeof(hashSize));
-  for (const auto& pair : i_hashes)
-  {
-    auto sizeName = pair.first.size();
-    outfile.write((char*)(&sizeName), sizeof(sizeName));
-    outfile.write(pair.first.c_str(), sizeName + 1);
-
-    auto sizeW = pair.second.size();
-    outfile.write((char*)(&sizeW), sizeof(sizeW));
-    outfile.write((char*)(&pair.second.front()), sizeW * sizeof(Math::Type));
-  }
+  WriteNameMapToFile(outfile, i_hashes);
   outfile.close();
+}
+
+template <class T>
+bool ReadSimpleFromFile(std::ifstream& i_infile, T& o_value)
+{
+  i_infile.read((char*)(&o_value), sizeof(T));
+  return !i_infile.eof();
+}
+
+bool ReadStringFromFile(std::ifstream& i_infile,
+			std::string& o_str)
+{
+  size_t size;
+  i_infile.read((char*)(&size), sizeof(size));
+  if (i_infile.eof())
+  {
+    return false;
+  }
+  o_str.resize(size);
+  i_infile.read(&o_str.front(), size + 1);
+  return !i_infile.eof();
+}
+
+template <class T>
+bool ReadVectorFromFile(std::ifstream& i_infile,
+			std::vector<T>& o_vector)
+{
+  auto size = o_vector.size();
+  i_infile.read((char*)(&size), sizeof(size));
+  if (i_infile.eof())
+  {
+    return false;
+  }
+  for (size_t count = 0; count < size; ++count)
+  {
+    T value;
+    i_infile.read((char*)(&value), sizeof(T));
+    if (i_infile.eof())
+    {
+      return false;
+    }
+    o_vector.push_back(value);
+  }
+  return !i_infile.eof();
+}
+
+template <class T>
+bool ReadNameMapFromFile(std::ifstream& i_infile,
+			 std::map<std::string, std::vector<T> >& o_map)
+{
+  auto size = o_map.size();
+  i_infile.read((char*)(&size), sizeof(size));
+  if (i_infile.eof())
+  {
+    return false;
+  }
+
+  for (size_t count = 0; count < size; ++count)
+  {
+    std::string name;
+    if (!ReadStringFromFile(i_infile, name))
+    {
+      return false;
+    }
+
+    auto insertRes =
+	o_map.insert(std::pair<std::string, std::vector<T> >
+		      (name, std::vector<T>()));
+
+    if (!ReadVectorFromFile(i_infile, insertRes.first->second))
+    {
+      return false;
+    }
+  }
+  return true;
 }
 
 void ReadModel (ArgParcer::Inputs& o_inputs,
@@ -797,37 +919,15 @@ void ReadModel (ArgParcer::Inputs& o_inputs,
 		const std::string& i_fileName)
 {
   std::ifstream infile (i_fileName, std::ifstream::binary);
-  infile.read((char*)(&o_inputs.d_hashSize), sizeof(o_inputs.d_hashSize));
+  ReadSimpleFromFile(infile, o_inputs.d_hashSize);
   LileParcer::hash_fn.setSize(o_inputs.d_hashSize);
-  infile.read((char*)(&o_inputs.d_l1), sizeof(o_inputs.d_l1));
-  infile.read((char*)(&o_inputs.d_l2), sizeof(o_inputs.d_l2));
-  infile.read((char*)(&o_inputs.d_lossFunction), sizeof(o_inputs.d_lossFunction));
-  infile.read((char*)(&o_inputs.d_link), sizeof(o_inputs.d_link));
 
-  auto hashSize = o_hashes.size();
-  infile.read((char*)(&hashSize), sizeof(hashSize));
+  ReadSimpleFromFile(infile, o_inputs.d_l1);
+  ReadSimpleFromFile(infile, o_inputs.d_l2);
+  ReadSimpleFromFile(infile, o_inputs.d_lossFunction);
+  ReadSimpleFromFile(infile, o_inputs.d_link);
 
-  for (size_t count = 0; count < hashSize; ++count)
-  {
-    size_t sizeName;
-    infile.read((char*)(&sizeName), sizeof(sizeName));
-    char* buffern = new char[sizeName + 1];
-    infile.read(buffern, sizeName + 1);
-
-    auto insertRes =
-	o_hashes.insert(HashesPair(std::string(buffern), Math::Vector()));
-    std::vector<Math::Type>& ws = insertRes.first->second;
-    delete[] buffern;
-
-    auto sizeW = ws.size();
-    infile.read((char*)(&sizeW), sizeof(sizeW));
-    for (size_t wCount = 0; wCount < sizeW; ++wCount)
-    {
-      Math::Type w;
-      infile.read((char*)(&w), sizeof(w));
-      ws.push_back(w);
-    }
-  }
+  ReadNameMapFromFile(infile, o_hashes);
   infile.close();
 }
 
@@ -899,9 +999,82 @@ void DoStep(const ArgParcer::Inputs& i_inputs,
   }
 }
 
-void RunWithTextFile(ArgParcer::Inputs& i_inputs)
+void WriteSampleToChach(std::ofstream& o_chachFile,
+			const LileParcer::Sample& i_sample)
+{
+  WriteStringToFile(o_chachFile, i_sample.d_lableName);
+  WriteVectorToFile(o_chachFile, i_sample.d_lables);
+  WriteNameMapToFile(o_chachFile, i_sample.d_nameSpases);
+}
+
+bool ReadSample(std::ifstream& i_chachFile,
+		 LileParcer::Sample& o_sample)
+{
+  o_sample = LileParcer::Sample();
+  if(!ReadStringFromFile(i_chachFile, o_sample.d_lableName))
+  {
+    return false;
+  }
+  if(!ReadVectorFromFile(i_chachFile, o_sample.d_lables))
+  {
+    return false;
+  }
+
+  if(!ReadNameMapFromFile(i_chachFile, o_sample.d_nameSpases))
+  {
+    return false;
+  }
+  return true;
+}
+
+void PassWithTextFile(const ArgParcer::Inputs& i_inputs,
+		     std::ofstream& o_predictionsFile,
+		     Hashes& io_hashes,
+		     size_t& io_count,
+		     Math::Type& io_lossSum,
+		     Math::Type& io_lossSumPrev,
+		     size_t& io_prevCount)
 {
   std::string input;
+  std::ifstream inputFile(i_inputs.d_inputPath);
+
+  std::ofstream cacheFile (i_inputs.d_cacheFile, std::ofstream::binary);
+
+  while (std::getline(inputFile, input))
+  {
+    auto sample = LileParcer::GetSampleFromLine(input);
+
+    WriteSampleToChach(cacheFile, sample);
+
+    DoStep(i_inputs, sample, o_predictionsFile,
+	   io_hashes, io_count, io_lossSum, io_lossSumPrev,
+	   io_prevCount);
+  }
+  cacheFile.close();
+  inputFile.close();
+}
+
+void PassWithCacheFile(const ArgParcer::Inputs& i_inputs,
+		       std::ofstream& o_predictionsFile,
+		       Hashes& io_hashes,
+		       size_t& io_count,
+		       Math::Type& io_lossSum,
+		       Math::Type& io_lossSumPrev,
+		       size_t& io_prevCount)
+{
+  std::ifstream inputFile(i_inputs.d_cacheFile);
+  LileParcer::Sample sample;
+  while (ReadSample(inputFile, sample))
+  {
+    DoStep(i_inputs, sample, o_predictionsFile,
+	   io_hashes, io_count, io_lossSum, io_lossSumPrev,
+	   io_prevCount);
+  }
+  inputFile.close();
+}
+
+void Run(ArgParcer::Inputs& i_inputs)
+{
   size_t count = 1;
   size_t prevCount = 1;
   Hashes hashes;
@@ -921,20 +1094,15 @@ void RunWithTextFile(ArgParcer::Inputs& i_inputs)
     predictionsFile.open(i_inputs.d_predictions.c_str());
   }
 
-
   std::cout << '\n' <<
       "Iteration num   | average loss  |  from last    |  lable        | yPredicted    | current t\n" <<
       "------------------------------------------------------------------------------------------------\n";
 
-  for (size_t pass = 0; pass < i_inputs.d_passes; ++pass)
+  PassWithTextFile(i_inputs, predictionsFile, hashes, count, lossSum, lossSumPrev, prevCount);
+
+  for (size_t pass = 0; pass + 1 < i_inputs.d_passes; ++pass)
   {
-    std::ifstream inputFile(i_inputs.d_inputPath.c_str());
-    while (std::getline(inputFile, input))
-    {
-      auto sample = LileParcer::GetSampleFromLine(input);
-      DoStep(i_inputs, sample, predictionsFile, hashes, count, lossSum, lossSumPrev, prevCount);
-    }
-    inputFile.close();
+    PassWithCacheFile(i_inputs, predictionsFile, hashes, count, lossSum, lossSumPrev, prevCount);
   }
   if (i_inputs.d_testonly)
   {
@@ -944,5 +1112,8 @@ void RunWithTextFile(ArgParcer::Inputs& i_inputs)
   {
     WriteModel (i_inputs, hashes, i_inputs.d_finalRegressor);
   }
+
+  print("");
+  print("Run finished");
 }
 } // namespace Learning
