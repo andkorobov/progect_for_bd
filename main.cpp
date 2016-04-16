@@ -127,6 +127,20 @@ namespace ArgParcer
 std::string getCmdOption(char ** begin, char ** end, const std::string& option);
 bool cmdOptionExists(char** begin, char** end, const std::string& option);
 
+enum LinkType
+{
+  IDENTITY,
+  LOGISTIC,
+  GLF1
+};
+
+static std::vector<std::string> LinkTypeStr(
+{
+  "identity",
+  "logistic",
+  "glf1"
+});
+
 struct Inputs
 {
   std::string d_inputPath;
@@ -139,6 +153,7 @@ struct Inputs
   bool d_testonly;
   std::string d_finalRegressor;
   std::string d_predictions;
+  LinkType d_link;
 };
 
 Inputs GetInputs(int argc, char* argv[]);
@@ -156,7 +171,8 @@ void print(const ArgParcer::Inputs& i_inputs)
       << "l2 = " << i_inputs.d_l2 << '\n'
       << "testonly = " << i_inputs.d_testonly << '\n'
       << "final_regressor = " << i_inputs.d_finalRegressor << '\n'
-      << "predictions = " << i_inputs.d_predictions << '\n';
+      << "predictions = " << i_inputs.d_predictions << '\n'
+      << "link = " << ArgParcer::LinkTypeStr[i_inputs.d_link] << '\n';
 }
 
 namespace LileParcer
@@ -508,6 +524,20 @@ Inputs GetInputs(int argc, char* argv[])
     }
   }
 
+  inputs.d_link = IDENTITY;
+  std::string linkArg = getCmdOption(argv, argv + argc, "--link");
+  if (!linkArg.empty())
+  {
+    if (linkArg == std::string("logistic"))
+    {
+      inputs.d_link = LOGISTIC;
+    }
+    if (linkArg == std::string("glf1"))
+    {
+      inputs.d_link = GLF1;
+    }
+  }
+
   inputs.d_hashSize = 262144;
 
   auto bitPrecision = getCmdOption(argv, argv + argc, "--bit_precision");
@@ -734,6 +764,7 @@ void WriteModel (const ArgParcer::Inputs& i_inputs,
   outfile.write((char*)(&i_inputs.d_l1), sizeof(i_inputs.d_l1));
   outfile.write((char*)(&i_inputs.d_l2), sizeof(i_inputs.d_l2));
   outfile.write((char*)(&i_inputs.d_lossFunction), sizeof(i_inputs.d_lossFunction));
+  outfile.write((char*)(&i_inputs.d_link), sizeof(i_inputs.d_link));
 
   auto hashSize = i_hashes.size();
   outfile.write((char*)(&hashSize), sizeof(hashSize));
@@ -760,6 +791,7 @@ void ReadModel (ArgParcer::Inputs& o_inputs,
   infile.read((char*)(&o_inputs.d_l1), sizeof(o_inputs.d_l1));
   infile.read((char*)(&o_inputs.d_l2), sizeof(o_inputs.d_l2));
   infile.read((char*)(&o_inputs.d_lossFunction), sizeof(o_inputs.d_lossFunction));
+  infile.read((char*)(&o_inputs.d_link), sizeof(o_inputs.d_link));
 
   auto hashSize = o_hashes.size();
   infile.read((char*)(&hashSize), sizeof(hashSize));
@@ -788,6 +820,21 @@ void ReadModel (ArgParcer::Inputs& o_inputs,
   infile.close();
 }
 
+Math::Type LinkFunction(const ArgParcer::Inputs& i_inputs,
+			const Math::Type& i_yPredicted)
+{
+  switch (i_inputs.d_link)
+  {
+    case ArgParcer::LOGISTIC:
+      return Math::Expit(i_yPredicted);
+    case ArgParcer::GLF1:
+      return Math::Expit(i_yPredicted) * 2 - 1;
+    case ArgParcer::IDENTITY:
+      return i_yPredicted;
+  }
+  return i_yPredicted;
+}
+
 void DoStep(const ArgParcer::Inputs& i_inputs,
 	    LileParcer::Sample& io_sample,
 	    std::ofstream& o_predictionsFile,
@@ -810,7 +857,7 @@ void DoStep(const ArgParcer::Inputs& i_inputs,
     auto currentT = i_inputs.d_initialT / io_count;
     if (i_inputs.d_testonly)
     {
-      o_predictionsFile << yPredicted << '\n';
+      o_predictionsFile << LinkFunction(i_inputs, yPredicted) << '\n';
     }
     else
     {
@@ -834,7 +881,7 @@ void DoStep(const ArgParcer::Inputs& i_inputs,
       std::cout << io_lossSum / io_prevCount << "\t| ";
       std::cout << io_lossSumPrev / (io_prevCount / 2) << "\t| ";
       std::cout << lable << "\t| ";
-      std::cout << yPredicted << "\t| ";
+      std::cout << LinkFunction(i_inputs, yPredicted) << "\t| ";
       std::cout << currentT << "\n";
       io_lossSumPrev = 0;
     }
