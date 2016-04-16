@@ -209,194 +209,33 @@ using HashesPair = std::pair<std::string, std::vector<Math::Type> >;
 
 Math::Type GetYPredicted(Hashes& io_hashes,
 			 const LileParcer::Sample& i_sample,
-			 const ArgParcer::Inputs& i_inputs)
-{
-  Math::Type yPredicted = 0;
-  for (const auto& nameAndNamespace : i_sample.d_nameSpases)
-  {
-	auto hash = io_hashes.find(nameAndNamespace.first);
-	if (hash == io_hashes.end())
-	{
-	  hash = io_hashes.insert(
-	      HashesPair(nameAndNamespace.first,
-			 std::vector<Math::Type>
-			  (i_inputs.d_hashSize, 0.))).first;
-	}
-	for (const auto& feature : nameAndNamespace.second)
-	{
-	    yPredicted += hash->second[feature.d_featureHash] * feature.d_value;
-	}
-  }
-  return yPredicted;
-}
+			 const ArgParcer::Inputs& i_inputs);
 
 void Learning(Hashes& io_hashes,
 	      const LileParcer::Sample& i_sample,
 	      const Math::Type&  i_lable,
 	      const Math::Type&  i_factor,
 	      const Math::Type&  i_currentT,
-	      const ArgParcer::Inputs& i_inputs)
-{
-  for (const auto& nameAndNamespace : i_sample.d_nameSpases)
-  {
-    auto hash = io_hashes.find(nameAndNamespace.first);
-
-    for (const auto& feature : nameAndNamespace.second)
-    {
-      auto& w = hash->second[feature.d_featureHash];
-      auto grad = i_lable * i_factor * feature.d_value +
-	  w * i_inputs.d_l2 + std::signbit(w)  * i_inputs.d_l1;
-
-      w -= grad * i_currentT;
-    }
-  }
-}
+	      const ArgParcer::Inputs& i_inputs);
 
 void WriteModel (const ArgParcer::Inputs& i_inputs,
 		 const Hashes& i_hashes,
-		 const std::string& i_fileName)
-{
-  std::ofstream outfile (i_fileName, std::ofstream::binary);
-  outfile.write((char*)(&i_inputs.d_hashSize), sizeof(i_inputs.d_hashSize));
-  outfile.write((char*)(&i_inputs.d_l1), sizeof(i_inputs.d_l1));
-  outfile.write((char*)(&i_inputs.d_l2), sizeof(i_inputs.d_l2));
-  outfile.write((char*)(&i_inputs.d_lossFunction), sizeof(i_inputs.d_lossFunction));
-
-  auto hashSize = i_hashes.size();
-  outfile.write((char*)(&hashSize), sizeof(hashSize));
-  for (const auto& pair : i_hashes)
-  {
-    auto sizeName = pair.first.size();
-    outfile.write((char*)(&sizeName), sizeof(sizeName));
-    outfile.write(pair.first.c_str(), sizeName + 1);
-
-    auto sizeW = pair.second.size();
-    outfile.write((char*)(&sizeW), sizeof(sizeW));
-    outfile.write((char*)(&pair.second.front()), sizeW * sizeof(Math::Type));
-  }
-
-}
+		 const std::string& i_fileName);
 
 void ReadModel (ArgParcer::Inputs& o_inputs,
 		Hashes& o_hashes,
-		const std::string& i_fileName)
-{
-  std::ifstream infile (i_fileName, std::ifstream::binary);
-  infile.read((char*)(&o_inputs.d_hashSize), sizeof(o_inputs.d_hashSize));
-  LileParcer::hash_fn.setSize(o_inputs.d_hashSize);
-  infile.read((char*)(&o_inputs.d_l1), sizeof(o_inputs.d_l1));
-  infile.read((char*)(&o_inputs.d_l2), sizeof(o_inputs.d_l2));
-  infile.read((char*)(&o_inputs.d_lossFunction), sizeof(o_inputs.d_lossFunction));
+		const std::string& i_fileName);
 
-  auto hashSize = o_hashes.size();
-  infile.read((char*)(&hashSize), sizeof(hashSize));
+void DoStep(const ArgParcer::Inputs& i_inputs,
+	    LileParcer::Sample& io_sample,
+	    std::ofstream& o_predictionsFile,
+	    Hashes& io_hashes,
+	    size_t& io_count,
+	    Math::Type& io_lossSum,
+	    Math::Type& io_lossSumPrev,
+	    size_t& io_prevCount);
 
-  for (size_t count = 0; count < hashSize; ++count)
-  {
-    size_t sizeName;
-    infile.read((char*)(&sizeName), sizeof(sizeName));
-    char* buffern = new char[sizeName + 1];
-    infile.read(buffern, sizeName + 1);
-
-    auto insertRes =
-	o_hashes.insert(HashesPair(std::string(buffern), Math::Vector()));
-    std::vector<Math::Type>& ws = insertRes.first->second;
-    delete[] buffern;
-
-    auto sizeW = ws.size();
-    infile.read((char*)(&sizeW), sizeof(sizeW));
-    for (size_t wCount = 0; wCount < sizeW; ++wCount)
-    {
-      Math::Type w;
-      infile.read((char*)(&w), sizeof(w));
-      ws.push_back(w);
-    }
-  }
-}
-
-void RunWithTextFile(ArgParcer::Inputs& i_inputs)
-{
-
-  std::string input;
-  size_t count = 1;
-  size_t prev_count = 1;
-  Hashes hashes;
-
-  if (i_inputs.d_testonly)
-  {
-    ReadModel(i_inputs, hashes, i_inputs.d_finalRegressor);
-  }
-
-  print(i_inputs);
-
-  Math::Type lossSum = 0;
-  Math::Type lossSumPrev = 0;
-  std::ofstream predictionsFile;
-  if (i_inputs.d_testonly)
-  {
-    predictionsFile.open(i_inputs.d_predictions.c_str());
-  }
-
-
-  std::cout << '\n' <<
-      "Iteration num   | average loss  |  from last    |  lable        | yPredicted    | current t\n" <<
-      "------------------------------------------------------------------------------------------------\n";
-
-  for (size_t pass = 0; pass < i_inputs.d_passes; ++pass)
-  {
-    std::ifstream inputFile(i_inputs.d_inputPath.c_str());
-    while (std::getline(inputFile, input))
-    {
-      auto sample = LileParcer::GetSampleFromLine(input);
-      if (i_inputs.d_testonly && sample.d_lables.size() != 1)
-      {
-	sample.d_lables = Math::Vector(1, 0.);
-      }
-
-      for (const auto& lable : sample.d_lables)
-      {
-	auto yPredicted = GetYPredicted(hashes, sample, i_inputs);
-	auto M = yPredicted * lable;
-	Math::Type factor = LossFunctions::LossFunctionsGradFactor(i_inputs.d_lossFunction, M);
-	auto currentT = i_inputs.d_initialT / count;
-	if (i_inputs.d_testonly)
-	{
-	  predictionsFile << yPredicted << '\n';
-	}
-	else
-	{
-	  Learning(hashes, sample, lable, factor, currentT, i_inputs);
-	}
-
-	auto loss = LossFunctions::LossFunctions(i_inputs.d_lossFunction, M);
-	lossSum += loss;
-	lossSumPrev += loss;
-
-	if (++count > prev_count * 2)
-	{
-	  prev_count *= 2;
-	  std::cout << prev_count;
-	  if (prev_count < 10000000.)
-	  {
-	    std::cout << "\t";
-	  }
-	  std::cout << "\t| " << std::fixed;
-	  std::cout.precision(8);
-	  std::cout << lossSum / prev_count << "\t| ";
-	  std::cout << lossSumPrev / (prev_count / 2) << "\t| ";
-	  std::cout << lable << "\t| ";
-	  std::cout << yPredicted << "\t| ";
-	  std::cout << currentT << "\n";
-	  lossSumPrev = 0;
-	}
-      }
-    }
-  }
-  if (!i_inputs.d_finalRegressor.empty() && !i_inputs.d_testonly)
-  {
-    WriteModel (i_inputs, hashes, i_inputs.d_finalRegressor);
-  }
-}
+void RunWithTextFile(ArgParcer::Inputs& i_inputs);
 } // namespace Learning
 
 //------------------------------------------------------------------------------------------------
@@ -730,6 +569,10 @@ Inputs GetInputs(int argc, char* argv[])
 }
 } // namespace ArgParcer
 
+//------------------------------------------------------------------------------------------------
+//|                                          LileParcer                                          |
+//------------------------------------------------------------------------------------------------
+
 namespace LileParcer
 {
 Hash::Hash():
@@ -830,3 +673,218 @@ Sample GetSampleFromLine(const std::string& i_line)
   return result;
 }
 } // namespace LileParcer
+
+//------------------------------------------------------------------------------------------------
+//|                                          Learning                                            |
+//------------------------------------------------------------------------------------------------
+
+namespace Learning
+{
+Math::Type GetYPredicted(Hashes& io_hashes,
+			 const LileParcer::Sample& i_sample,
+			 const ArgParcer::Inputs& i_inputs)
+{
+  Math::Type yPredicted = 0;
+  for (const auto& nameAndNamespace : i_sample.d_nameSpases)
+  {
+	auto hash = io_hashes.find(nameAndNamespace.first);
+	if (hash == io_hashes.end())
+	{
+	  hash = io_hashes.insert(
+	      HashesPair(nameAndNamespace.first,
+			 std::vector<Math::Type>
+			  (i_inputs.d_hashSize, 0.))).first;
+	}
+	for (const auto& feature : nameAndNamespace.second)
+	{
+	    yPredicted += hash->second[feature.d_featureHash] * feature.d_value;
+	}
+  }
+  return yPredicted;
+}
+
+void Learning(Hashes& io_hashes,
+	      const LileParcer::Sample& i_sample,
+	      const Math::Type&  i_lable,
+	      const Math::Type&  i_factor,
+	      const Math::Type&  i_currentT,
+	      const ArgParcer::Inputs& i_inputs)
+{
+  for (const auto& nameAndNamespace : i_sample.d_nameSpases)
+  {
+    auto hash = io_hashes.find(nameAndNamespace.first);
+
+    for (const auto& feature : nameAndNamespace.second)
+    {
+      auto& w = hash->second[feature.d_featureHash];
+      auto grad = i_lable * i_factor * feature.d_value +
+	  w * i_inputs.d_l2 + std::signbit(w)  * i_inputs.d_l1;
+
+      w -= grad * i_currentT;
+    }
+  }
+}
+
+void WriteModel (const ArgParcer::Inputs& i_inputs,
+		 const Hashes& i_hashes,
+		 const std::string& i_fileName)
+{
+  std::ofstream outfile (i_fileName, std::ofstream::binary);
+  outfile.write((char*)(&i_inputs.d_hashSize), sizeof(i_inputs.d_hashSize));
+  outfile.write((char*)(&i_inputs.d_l1), sizeof(i_inputs.d_l1));
+  outfile.write((char*)(&i_inputs.d_l2), sizeof(i_inputs.d_l2));
+  outfile.write((char*)(&i_inputs.d_lossFunction), sizeof(i_inputs.d_lossFunction));
+
+  auto hashSize = i_hashes.size();
+  outfile.write((char*)(&hashSize), sizeof(hashSize));
+  for (const auto& pair : i_hashes)
+  {
+    auto sizeName = pair.first.size();
+    outfile.write((char*)(&sizeName), sizeof(sizeName));
+    outfile.write(pair.first.c_str(), sizeName + 1);
+
+    auto sizeW = pair.second.size();
+    outfile.write((char*)(&sizeW), sizeof(sizeW));
+    outfile.write((char*)(&pair.second.front()), sizeW * sizeof(Math::Type));
+  }
+  outfile.close();
+}
+
+void ReadModel (ArgParcer::Inputs& o_inputs,
+		Hashes& o_hashes,
+		const std::string& i_fileName)
+{
+  std::ifstream infile (i_fileName, std::ifstream::binary);
+  infile.read((char*)(&o_inputs.d_hashSize), sizeof(o_inputs.d_hashSize));
+  LileParcer::hash_fn.setSize(o_inputs.d_hashSize);
+  infile.read((char*)(&o_inputs.d_l1), sizeof(o_inputs.d_l1));
+  infile.read((char*)(&o_inputs.d_l2), sizeof(o_inputs.d_l2));
+  infile.read((char*)(&o_inputs.d_lossFunction), sizeof(o_inputs.d_lossFunction));
+
+  auto hashSize = o_hashes.size();
+  infile.read((char*)(&hashSize), sizeof(hashSize));
+
+  for (size_t count = 0; count < hashSize; ++count)
+  {
+    size_t sizeName;
+    infile.read((char*)(&sizeName), sizeof(sizeName));
+    char* buffern = new char[sizeName + 1];
+    infile.read(buffern, sizeName + 1);
+
+    auto insertRes =
+	o_hashes.insert(HashesPair(std::string(buffern), Math::Vector()));
+    std::vector<Math::Type>& ws = insertRes.first->second;
+    delete[] buffern;
+
+    auto sizeW = ws.size();
+    infile.read((char*)(&sizeW), sizeof(sizeW));
+    for (size_t wCount = 0; wCount < sizeW; ++wCount)
+    {
+      Math::Type w;
+      infile.read((char*)(&w), sizeof(w));
+      ws.push_back(w);
+    }
+  }
+  infile.close();
+}
+
+void DoStep(const ArgParcer::Inputs& i_inputs,
+	    LileParcer::Sample& io_sample,
+	    std::ofstream& o_predictionsFile,
+	    Hashes& io_hashes,
+	    size_t& io_count,
+	    Math::Type& io_lossSum,
+	    Math::Type& io_lossSumPrev,
+	    size_t& io_prevCount)
+{
+  if (i_inputs.d_testonly && io_sample.d_lables.size() != 1)
+  {
+    io_sample.d_lables = Math::Vector(1, 0.);
+  }
+
+  for (const auto& lable : io_sample.d_lables)
+  {
+    auto yPredicted = GetYPredicted(io_hashes, io_sample, i_inputs);
+    auto M = yPredicted * lable;
+    Math::Type factor = LossFunctions::LossFunctionsGradFactor(i_inputs.d_lossFunction, M);
+    auto currentT = i_inputs.d_initialT / io_count;
+    if (i_inputs.d_testonly)
+    {
+      o_predictionsFile << yPredicted << '\n';
+    }
+    else
+    {
+      Learning(io_hashes, io_sample, lable, factor, currentT, i_inputs);
+    }
+
+    auto loss = LossFunctions::LossFunctions(i_inputs.d_lossFunction, M);
+    io_lossSum += loss;
+    io_lossSumPrev += loss;
+
+    if (++io_count > io_prevCount * 2)
+    {
+      io_prevCount *= 2;
+      std::cout << io_prevCount;
+      if (io_prevCount < 10000000.)
+      {
+	std::cout << "\t";
+      }
+      std::cout << "\t| " << std::fixed;
+      std::cout.precision(8);
+      std::cout << io_lossSum / io_prevCount << "\t| ";
+      std::cout << io_lossSumPrev / (io_prevCount / 2) << "\t| ";
+      std::cout << lable << "\t| ";
+      std::cout << yPredicted << "\t| ";
+      std::cout << currentT << "\n";
+      io_lossSumPrev = 0;
+    }
+  }
+}
+
+void RunWithTextFile(ArgParcer::Inputs& i_inputs)
+{
+  std::string input;
+  size_t count = 1;
+  size_t prevCount = 1;
+  Hashes hashes;
+
+  if (i_inputs.d_testonly)
+  {
+    ReadModel(i_inputs, hashes, i_inputs.d_finalRegressor);
+  }
+
+  print(i_inputs);
+
+  Math::Type lossSum = 0;
+  Math::Type lossSumPrev = 0;
+  std::ofstream predictionsFile;
+  if (i_inputs.d_testonly)
+  {
+    predictionsFile.open(i_inputs.d_predictions.c_str());
+  }
+
+
+  std::cout << '\n' <<
+      "Iteration num   | average loss  |  from last    |  lable        | yPredicted    | current t\n" <<
+      "------------------------------------------------------------------------------------------------\n";
+
+  for (size_t pass = 0; pass < i_inputs.d_passes; ++pass)
+  {
+    std::ifstream inputFile(i_inputs.d_inputPath.c_str());
+    while (std::getline(inputFile, input))
+    {
+      auto sample = LileParcer::GetSampleFromLine(input);
+      DoStep(i_inputs, sample, predictionsFile, hashes, count, lossSum, lossSumPrev, prevCount);
+    }
+    inputFile.close();
+  }
+  if (i_inputs.d_testonly)
+  {
+    predictionsFile.close();
+  }
+  if (!i_inputs.d_finalRegressor.empty() && !i_inputs.d_testonly)
+  {
+    WriteModel (i_inputs, hashes, i_inputs.d_finalRegressor);
+  }
+}
+} // namespace Learning
