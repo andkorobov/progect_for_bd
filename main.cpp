@@ -224,7 +224,7 @@ struct NameSpase
 
 NameSpase getNameSpase(const std::string& i_line);
 
-Sample GetSampleFromLine(const std::string& i_line);
+Sample GetSampleFromLine(const std::string& i_line, const ArgParcer::Inputs& i_inputs);
 } // namespace LileParcer
 
 namespace Learning
@@ -241,7 +241,8 @@ void Learning(Hashes& io_hashes,
 	      const Math::Type&  i_lable,
 	      const Math::Type&  i_factor,
 	      const Math::Type&  i_currentT,
-	      const ArgParcer::Inputs& i_inputs);
+	      const ArgParcer::Inputs& i_inputs,
+	      Hashes& io_sqrHashes);
 
 void WriteModel (const ArgParcer::Inputs& i_inputs,
 		 const Hashes& i_hashes,
@@ -258,7 +259,8 @@ void DoStep(const ArgParcer::Inputs& i_inputs,
 	    size_t& io_count,
 	    Math::Type& io_lossSum,
 	    Math::Type& io_lossSumPrev,
-	    size_t& io_prevCount);
+	    size_t& io_prevCount,
+	    Hashes& io_sqrHashes);
 
 void PassWithTextFile(const ArgParcer::Inputs& i_inputs,
 		     std::ofstream& o_predictionsFile,
@@ -266,7 +268,8 @@ void PassWithTextFile(const ArgParcer::Inputs& i_inputs,
 		     size_t& io_count,
 		     Math::Type& io_lossSum,
 		     Math::Type& io_lossSumPrev,
-		     size_t& io_prevCount);
+		     size_t& io_prevCount,
+		     Hashes& io_sqrHashes);
 
 void PassWithCacheFile(const ArgParcer::Inputs& i_inputs,
 		       std::ofstream& o_predictionsFile,
@@ -274,7 +277,8 @@ void PassWithCacheFile(const ArgParcer::Inputs& i_inputs,
 		       size_t& io_count,
 		       Math::Type& io_lossSum,
 		       Math::Type& io_lossSumPrev,
-		       size_t& io_prevCount);
+		       size_t& io_prevCount,
+		       Hashes& io_sqrHashes);
 
 void Run(ArgParcer::Inputs& i_inputs);
 } // namespace Learning
@@ -724,7 +728,7 @@ NameSpase getNameSpase(const std::string& i_line)
   return result;
 }
 
-Sample GetSampleFromLine(const std::string& i_line)
+Sample GetSampleFromLine(const std::string& i_line, const ArgParcer::Inputs& i_inputs)
 {
   auto splitedLine = Split(i_line, "|");
   Sample result;
@@ -794,7 +798,7 @@ void Learning(Hashes& io_hashes,
     {
       if (sqrHashe == io_sqrHashes.end())
       {
-	sqrHashe = io_hashes.insert(
+	sqrHashe = io_sqrHashes.insert(
 	    HashesPair(nameAndNamespace.first,
 		       std::vector<Math::Type>
 			(i_inputs.d_hashSize, 0.))).first;
@@ -1099,7 +1103,7 @@ void PassWithTextFile(const ArgParcer::Inputs& i_inputs,
 
   while (std::getline(inputFile, input))
   {
-    auto sample = LileParcer::GetSampleFromLine(input);
+    auto sample = LileParcer::GetSampleFromLine(input, i_inputs);
 
     WriteSampleToChach(cacheFile, sample);
 
