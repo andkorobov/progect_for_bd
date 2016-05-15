@@ -151,6 +151,7 @@ struct Inputs
   Math::Type d_l1;
   Math::Type d_l2;
   bool d_testonly;
+  bool d_adaptive;
   std::string d_finalRegressor;
   std::string d_predictions;
   std::string d_cacheFile;
@@ -171,6 +172,7 @@ void print(const ArgParcer::Inputs& i_inputs)
       << "l1 = " << i_inputs.d_l1 << '\n'
       << "l2 = " << i_inputs.d_l2 << '\n'
       << "testonly = " << i_inputs.d_testonly << '\n'
+      << "adaptive = " << i_inputs.d_adaptive << '\n'
       << "final_regressor = " << i_inputs.d_finalRegressor << '\n'
       << "cache_file = " << i_inputs.d_cacheFile << '\n'
       << "predictions = " << i_inputs.d_predictions << '\n'
@@ -625,6 +627,7 @@ Inputs GetInputs(int argc, char* argv[])
   }
 
   inputs.d_testonly = cmdOptionExists(argv, argv + argc, "--testonly");
+  inputs.d_adaptive = cmdOptionExists(argv, argv + argc, "--adaptive");
 
   inputs.d_finalRegressor = getCmdOption(argv, argv + argc, "--final_regressor");
   inputs.d_predictions = getCmdOption(argv, argv + argc, "--predictions");
@@ -780,17 +783,36 @@ void Learning(Hashes& io_hashes,
 	      const Math::Type&  i_lable,
 	      const Math::Type&  i_factor,
 	      const Math::Type&  i_currentT,
-	      const ArgParcer::Inputs& i_inputs)
+	      const ArgParcer::Inputs& i_inputs,
+	      Hashes& io_sqrHashes)
 {
   for (const auto& nameAndNamespace : i_sample.d_nameSpases)
   {
     auto hash = io_hashes.find(nameAndNamespace.first);
+    auto sqrHashe = io_sqrHashes.find(nameAndNamespace.first);
+    if (i_inputs.d_adaptive)
+    {
+      if (sqrHashe == io_sqrHashes.end())
+      {
+	sqrHashe = io_hashes.insert(
+	    HashesPair(nameAndNamespace.first,
+		       std::vector<Math::Type>
+			(i_inputs.d_hashSize, 0.))).first;
+      }
+    }
 
     for (const auto& feature : nameAndNamespace.second)
     {
       auto& w = hash->second[feature.d_featureHash];
       auto grad = i_lable * i_factor * feature.d_value +
 	  w * i_inputs.d_l2 + std::signbit(w)  * i_inputs.d_l1;
+
+      if (i_inputs.d_adaptive)
+      {
+	auto& gradSqr = sqrHashe->second[feature.d_featureHash];
+	gradSqr += grad * grad;
+	grad /= sqrt(gradSqr);
+      }
 
       w -= grad * i_currentT;
     }
@@ -986,7 +1008,8 @@ void DoStep(const ArgParcer::Inputs& i_inputs,
 	    size_t& io_count,
 	    Math::Type& io_lossSum,
 	    Math::Type& io_lossSumPrev,
-	    size_t& io_prevCount)
+	    size_t& io_prevCount,
+	    Hashes& io_sqrHashes)
 {
   if (i_inputs.d_testonly && io_sample.d_lables.size() != 1)
   {
@@ -1005,7 +1028,7 @@ void DoStep(const ArgParcer::Inputs& i_inputs,
     }
     else
     {
-      Learning(io_hashes, io_sample, lable, factor, currentT, i_inputs);
+      Learning(io_hashes, io_sample, lable, factor, currentT, i_inputs, io_sqrHashes);
     }
 
     auto loss = LossFunctions::LossFunctions(i_inputs.d_lossFunction, M);
@@ -1066,7 +1089,8 @@ void PassWithTextFile(const ArgParcer::Inputs& i_inputs,
 		     size_t& io_count,
 		     Math::Type& io_lossSum,
 		     Math::Type& io_lossSumPrev,
-		     size_t& io_prevCount)
+		     size_t& io_prevCount,
+		     Hashes& io_sqrHashes)
 {
   std::string input;
   std::ifstream inputFile(i_inputs.d_inputPath);
@@ -1081,7 +1105,7 @@ void PassWithTextFile(const ArgParcer::Inputs& i_inputs,
 
     DoStep(i_inputs, sample, o_predictionsFile,
 	   io_hashes, io_count, io_lossSum, io_lossSumPrev,
-	   io_prevCount);
+	   io_prevCount, io_sqrHashes);
   }
   cacheFile.close();
   inputFile.close();
@@ -1093,7 +1117,8 @@ void PassWithCacheFile(const ArgParcer::Inputs& i_inputs,
 		       size_t& io_count,
 		       Math::Type& io_lossSum,
 		       Math::Type& io_lossSumPrev,
-		       size_t& io_prevCount)
+		       size_t& io_prevCount,
+		       Hashes& io_sqrHashes)
 {
   std::ifstream inputFile(i_inputs.d_cacheFile);
   LileParcer::Sample sample;
@@ -1101,7 +1126,7 @@ void PassWithCacheFile(const ArgParcer::Inputs& i_inputs,
   {
     DoStep(i_inputs, sample, o_predictionsFile,
 	   io_hashes, io_count, io_lossSum, io_lossSumPrev,
-	   io_prevCount);
+	   io_prevCount, io_sqrHashes);
   }
   inputFile.close();
 }
@@ -1111,6 +1136,7 @@ void Run(ArgParcer::Inputs& i_inputs)
   size_t count = 1;
   size_t prevCount = 1;
   Hashes hashes;
+  Hashes sqrHashes; // for adaptive
 
   if (i_inputs.d_testonly)
   {
@@ -1131,11 +1157,11 @@ void Run(ArgParcer::Inputs& i_inputs)
       "Iteration num   | average loss  |  from last    |  lable        | yPredicted    | current t\n" <<
       "------------------------------------------------------------------------------------------------\n";
 
-  PassWithTextFile(i_inputs, predictionsFile, hashes, count, lossSum, lossSumPrev, prevCount);
+  PassWithTextFile(i_inputs, predictionsFile, hashes, count, lossSum, lossSumPrev, prevCount, sqrHashes);
 
   for (size_t pass = 0; pass + 1 < i_inputs.d_passes; ++pass)
   {
-    PassWithCacheFile(i_inputs, predictionsFile, hashes, count, lossSum, lossSumPrev, prevCount);
+    PassWithCacheFile(i_inputs, predictionsFile, hashes, count, lossSum, lossSumPrev, prevCount, sqrHashes);
   }
   if (i_inputs.d_testonly)
   {

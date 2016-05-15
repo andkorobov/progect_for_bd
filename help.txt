@@ -27,3 +27,6 @@ Input options:
   --cache                  Use a cache.  The default is <data>.cache
   --cache_file arg         The location(s) of cache_file.
   
+Gradient Descent options:
+  --adaptive            use adaptive, individual learning rates.
+  
