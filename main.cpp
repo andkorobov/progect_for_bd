@@ -6,6 +6,7 @@
 #include <fstream>
 #include <map>
 #include <functional>
+#include <sstream>
 
 
 namespace
@@ -156,6 +157,7 @@ struct Inputs
   std::string d_predictions;
   std::string d_cacheFile;
   LinkType d_link;
+  std::vector<std::string> d_quadratic;
 };
 
 Inputs GetInputs(int argc, char* argv[]);
@@ -187,6 +189,11 @@ void print(const ArgParcer::Inputs& i_inputs)
   }
 
   std::cout << "link = " << ArgParcer::LinkTypeStr[i_inputs.d_link] << '\n';
+
+  if (!i_inputs.d_quadratic.empty())
+  {
+    std::cout << "quadratic = " << i_inputs.d_quadratic << '\n';
+  }
 }
 
 namespace LileParcer
@@ -534,6 +541,23 @@ std::string getCmdOption(char ** begin, char ** end, const std::string& option)
   return "";
 }
 
+std::vector<std::string> getCmdOptions(char ** begin, char ** end, const std::string& option)
+{
+  std::vector<std::string> result;
+  while((begin = std::find(begin, end, option)) != end)
+  {
+    if (++begin != end)
+    {
+      result.push_back(*begin);
+    }
+    else
+    {
+      break;
+    }
+  }
+  return result;
+}
+
 bool cmdOptionExists(char** begin, char** end, const std::string& option)
 {
     return std::find(begin, end, option) != end;
@@ -548,7 +572,6 @@ int pow(size_t val, size_t P)
   }
   return r;
 }
-
 
 Inputs GetInputs(int argc, char* argv[])
 {
@@ -651,6 +674,8 @@ Inputs GetInputs(int argc, char* argv[])
   {
     inputs.d_cacheFile = inputs.d_inputPath + std::string(".cache");
   }
+
+  inputs.d_quadratic = getCmdOptions(argv, argv + argc, "--quadratic");
 
   return inputs;
 }
@@ -759,6 +784,32 @@ Sample GetSampleFromLine(const std::string& i_line, const ArgParcer::Inputs& i_i
     result.d_nameSpases[nameSpace.d_name].swap(nameSpace.d_festures);
   }
 
+  for (const auto& quadratic : i_inputs.d_quadratic)
+  {
+    auto firstNamespase = result.d_nameSpases.find(quadratic.substr(0, 1));
+    auto secondNamespase = result.d_nameSpases.find(quadratic.substr(1, 1));
+    if (firstNamespase == result.d_nameSpases.end() ||
+	secondNamespase == result.d_nameSpases.end())
+    {
+      continue;
+    }
+    NameSpase nameSpace;
+    nameSpace.d_name = quadratic;
+    for (const auto& firstFeature : firstNamespase->second)
+    {
+      for (const auto& secondFeature : secondNamespase->second)
+      {
+	std::stringstream featureName;
+	featureName << firstFeature.d_featureHash << ' ' << secondFeature.d_featureHash;
+	nameSpace.d_festures.push_back({
+	  hash_fn(featureName.str()),
+	  1.
+	});
+      }
+    }
+    result.d_nameSpases[nameSpace.d_name].swap(nameSpace.d_festures);
+  }
+
   return result;
 }
 } // namespace LileParcer
@@ -820,14 +871,16 @@ void Learning(Hashes& io_hashes,
       auto& w = hash->second[feature.d_featureHash];
       auto grad = i_lable * i_factor * feature.d_value +
 	  w * i_inputs.d_l2 + std::signbit(w)  * i_inputs.d_l1;
-
+      if (grad == 0.)
+      {
+	continue;
+      }
       if (i_inputs.d_adaptive)
       {
 	auto& gradSqr = sqrHashe->second[feature.d_featureHash];
 	gradSqr += grad * grad;
 	grad /= sqrt(gradSqr);
       }
-
       w -= grad * i_currentT;
     }
   }

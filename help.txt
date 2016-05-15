@@ -3,6 +3,7 @@ Update options:
 
 Feature options:
 --bit_precision            number of bits in the feature table
+-q [ --quadratic ] arg     Create and use quadratic features
 
 Example options:
   --testonly               Ignore label information and just test
@@ -28,5 +29,5 @@ Input options:
   --cache_file arg         The location(s) of cache_file.
   
 Gradient Descent options:
-  --adaptive            use adaptive, individual learning rates.
+  --adaptive               use adaptive, individual learning rates.
   
