@@ -872,7 +872,7 @@ void SimpleWriteToFile(std::ofstream& o_outfile, const LileParcer::Feature& i_fe
   SimpleWriteToFile(o_outfile, i_feature.d_value);
 }
 
-void WriteStringToFile(std::ofstream& o_outfile, const std::string& i_str)
+void SimpleWriteToFile(std::ofstream& o_outfile, const std::string& i_str)
 {
   auto size = i_str.size();
   o_outfile.write(i_str.c_str(), size + 1);
@@ -897,7 +897,7 @@ void WriteNameMapToFile(std::ofstream& o_outfile,
   o_outfile.write((char*)(&size), sizeof(size));
   for (const auto& pair : i_map)
   {
-    WriteStringToFile(o_outfile, pair.first);
+    SimpleWriteToFile(o_outfile, pair.first);
     WriteVectorToFile(o_outfile, pair.second);
   }
 }
@@ -913,6 +913,8 @@ void WriteModel (const ArgParcer::Inputs& i_inputs,
   SimpleWriteToFile(outfile, i_inputs.d_l2);
   SimpleWriteToFile(outfile, i_inputs.d_lossFunction);
   SimpleWriteToFile(outfile, i_inputs.d_link);
+
+  WriteVectorToFile(outfile, i_inputs.d_quadratic);
 
   WriteNameMapToFile(outfile, i_hashes);
   outfile.close();
@@ -933,7 +935,7 @@ bool ReadSimpleFromFile(std::ifstream& i_infile, LileParcer::Feature& o_feature)
   return ReadSimpleFromFile(i_infile, o_feature.d_value);
 }
 
-bool ReadStringFromFile(std::ifstream& i_infile,
+bool ReadSimpleFromFile(std::ifstream& i_infile,
 			std::string& o_str)
 {
   o_str = std::string();
@@ -991,7 +993,7 @@ bool ReadNameMapFromFile(std::ifstream& i_infile,
   for (size_t count = 0; count < size; ++count)
   {
     std::string name;
-    if (!ReadStringFromFile(i_infile, name))
+    if (!ReadSimpleFromFile(i_infile, name))
     {
       return false;
     }
@@ -1022,6 +1024,8 @@ void ReadModel (ArgParcer::Inputs& o_inputs,
   ReadSimpleFromFile(infile, o_inputs.d_l2);
   ReadSimpleFromFile(infile, o_inputs.d_lossFunction);
   ReadSimpleFromFile(infile, o_inputs.d_link);
+
+  ReadVectorFromFile(infile, o_inputs.d_quadratic);
 
   ReadNameMapFromFile(infile, o_hashes);
   infile.close();
@@ -1125,7 +1129,7 @@ void DoStep(const ArgParcer::Inputs& i_inputs,
 void WriteSampleToChach(std::ofstream& o_chachFile,
 			const LileParcer::Sample& i_sample)
 {
-  WriteStringToFile(o_chachFile, i_sample.d_lableName);
+  SimpleWriteToFile(o_chachFile, i_sample.d_lableName);
   WriteVectorToFile(o_chachFile, i_sample.d_lables);
   WriteNameMapToFile(o_chachFile, i_sample.d_nameSpases);
 }
@@ -1134,7 +1138,7 @@ bool ReadSample(std::ifstream& i_chachFile,
 		 LileParcer::Sample& o_sample)
 {
   o_sample = LileParcer::Sample();
-  if(!ReadStringFromFile(i_chachFile, o_sample.d_lableName))
+  if(!ReadSimpleFromFile(i_chachFile, o_sample.d_lableName))
   {
     return false;
   }
