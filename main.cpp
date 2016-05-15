@@ -784,32 +784,6 @@ Sample GetSampleFromLine(const std::string& i_line, const ArgParcer::Inputs& i_i
     result.d_nameSpases[nameSpace.d_name].swap(nameSpace.d_festures);
   }
 
-  for (const auto& quadratic : i_inputs.d_quadratic)
-  {
-    auto firstNamespase = result.d_nameSpases.find(quadratic.substr(0, 1));
-    auto secondNamespase = result.d_nameSpases.find(quadratic.substr(1, 1));
-    if (firstNamespase == result.d_nameSpases.end() ||
-	secondNamespase == result.d_nameSpases.end())
-    {
-      continue;
-    }
-    NameSpase nameSpace;
-    nameSpace.d_name = quadratic;
-    for (const auto& firstFeature : firstNamespase->second)
-    {
-      for (const auto& secondFeature : secondNamespase->second)
-      {
-	std::stringstream featureName;
-	featureName << firstFeature.d_featureHash << ' ' << secondFeature.d_featureHash;
-	nameSpace.d_festures.push_back({
-	  hash_fn(featureName.str()),
-	  1.
-	});
-      }
-    }
-    result.d_nameSpases[nameSpace.d_name].swap(nameSpace.d_festures);
-  }
-
   return result;
 }
 } // namespace LileParcer
@@ -1081,6 +1055,32 @@ void DoStep(const ArgParcer::Inputs& i_inputs,
   if (i_inputs.d_testonly && io_sample.d_lables.size() != 1)
   {
     io_sample.d_lables = Math::Vector(1, 0.);
+  }
+
+  for (const auto& quadratic : i_inputs.d_quadratic)
+  {
+    auto firstNamespase = io_sample.d_nameSpases.find(quadratic.substr(0, 1));
+    auto secondNamespase = io_sample.d_nameSpases.find(quadratic.substr(1, 1));
+    if (firstNamespase == io_sample.d_nameSpases.end() ||
+	secondNamespase == io_sample.d_nameSpases.end())
+    {
+      continue;
+    }
+    LileParcer::NameSpase nameSpace;
+    nameSpace.d_name = quadratic;
+    for (const auto& firstFeature : firstNamespase->second)
+    {
+      for (const auto& secondFeature : secondNamespase->second)
+      {
+	std::stringstream featureName;
+	featureName << firstFeature.d_featureHash << ' ' << secondFeature.d_featureHash;
+	nameSpace.d_festures.push_back({
+	  LileParcer::hash_fn(featureName.str()),
+	  1.
+	});
+      }
+    }
+    io_sample.d_nameSpases[nameSpace.d_name].swap(nameSpace.d_festures);
   }
 
   for (const auto& lable : io_sample.d_lables)
