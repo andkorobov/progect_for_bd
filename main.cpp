@@ -172,11 +172,21 @@ void print(const ArgParcer::Inputs& i_inputs)
       << "l1 = " << i_inputs.d_l1 << '\n'
       << "l2 = " << i_inputs.d_l2 << '\n'
       << "testonly = " << i_inputs.d_testonly << '\n'
-      << "adaptive = " << i_inputs.d_adaptive << '\n'
-      << "final_regressor = " << i_inputs.d_finalRegressor << '\n'
-      << "cache_file = " << i_inputs.d_cacheFile << '\n'
-      << "predictions = " << i_inputs.d_predictions << '\n'
-      << "link = " << ArgParcer::LinkTypeStr[i_inputs.d_link] << '\n';
+      << "adaptive = " << i_inputs.d_adaptive << '\n';
+  if (!i_inputs.d_finalRegressor.empty())
+  {
+    std::cout << "final_regressor = " << i_inputs.d_finalRegressor << '\n';
+  }
+  if (!i_inputs.d_cacheFile.empty())
+  {
+    std::cout << "cache_file = " << i_inputs.d_cacheFile << '\n';
+  }
+  if (!i_inputs.d_predictions.empty())
+  {
+    std::cout << "predictions = " << i_inputs.d_predictions << '\n';
+  }
+
+  std::cout << "link = " << ArgParcer::LinkTypeStr[i_inputs.d_link] << '\n';
 }
 
 namespace LileParcer
