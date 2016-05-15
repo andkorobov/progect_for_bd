@@ -75,7 +75,7 @@ private:
   std::string d_what;
 };
 
-using Type = double;
+using Type = float;
 using Vector = std::vector<Type>;
 using Matrix = std::vector<Vector>;
 
@@ -184,11 +184,16 @@ class Hash
 public:
   Hash();
   size_t operator()(const std::string &s) const;
-  void setSize(size_t i_hashSize);
+  void setSize(size_t i_hashSize, size_t i_bithashSize);
+  size_t getSize() const
+  {
+    return d_bithashSize;
+  }
 
 private:
   std::hash<std::string> d_hash;
   size_t d_hashSize;
+  size_t d_bithashSize;
 };
 static Hash hash_fn;
 struct Feature
@@ -385,7 +390,7 @@ Vector MatrixProduct(const Matrix& i_lhs, const Vector& i_rhs)
 
 Matrix Product(const Matrix& i_lhs, const Vector& i_rhs)
 {
-  Matrix result(i_lhs.size(), std::vector<double>(i_lhs[0].size()));
+  Matrix result(i_lhs.size(), Vector(i_lhs[0].size()));
   for (size_t x = 0; x < i_lhs.size(); ++x)
   {
     for (size_t y = 0; y < i_lhs[0].size(); ++y)
@@ -567,7 +572,7 @@ Inputs GetInputs(int argc, char* argv[])
     }
   }
 
-  inputs.d_hashSize = 262144;
+  inputs.d_hashSize = 65536;
 
   auto bitPrecision = getCmdOption(argv, argv + argc, "--bit_precision");
 
@@ -578,7 +583,7 @@ Inputs GetInputs(int argc, char* argv[])
     if (intBitPrecision < 61 && intBitPrecision > 0)
     {
       inputs.d_hashSize = pow(2, intBitPrecision);
-      LileParcer::hash_fn.setSize(inputs.d_hashSize);
+      LileParcer::hash_fn.setSize(inputs.d_hashSize, intBitPrecision);
     }
   }
 
@@ -641,14 +646,16 @@ Inputs GetInputs(int argc, char* argv[])
 namespace LileParcer
 {
 Hash::Hash():
-  d_hashSize(262144) {}
+  d_hashSize(65536),
+  d_bithashSize(16){}
 size_t Hash::operator()(const std::string &s) const
 {
   return d_hash(s) % d_hashSize;
 }
-void Hash::setSize(size_t i_hashSize)
+void Hash::setSize(size_t i_hashSize, size_t i_bithashSize)
 {
   d_hashSize = i_hashSize;
+  d_bithashSize = i_bithashSize;
 }
 
 std::ostream& operator<<(std::ostream& o_out, const Feature& i_feature)
@@ -700,7 +707,7 @@ NameSpase getNameSpase(const std::string& i_line)
     {
       result.d_festures.push_back({
 	  hash_fn(featureNameValue[0]),
-	  std::stod(featureNameValue[1])
+	  std::stof(featureNameValue[1])
       });
     }
     else
@@ -796,6 +803,12 @@ void SimpleWriteToFile(std::ofstream& o_outfile, const T& i_value)
   o_outfile.write((char*)(&i_value), sizeof(T));
 }
 
+void SimpleWriteToFile(std::ofstream& o_outfile, const LileParcer::Feature& i_feature)
+{
+  o_outfile.write((char*)(&i_feature.d_featureHash), (LileParcer::hash_fn.getSize() + 3) / 4);
+  SimpleWriteToFile(o_outfile, i_feature.d_value);
+}
+
 void WriteStringToFile(std::ofstream& o_outfile, const std::string& i_str)
 {
   auto size = i_str.size();
@@ -808,7 +821,10 @@ void WriteVectorToFile(std::ofstream& o_outfile, const std::vector<T>& i_vector)
 {
   auto size = i_vector.size();
   o_outfile.write((char*)(&size), sizeof(size));
-  o_outfile.write((char*)(&i_vector.front()), size * sizeof(T));
+  for (const auto& v : i_vector)
+  {
+    SimpleWriteToFile(o_outfile, v);
+  }
 }
 
 template <class T>
@@ -830,6 +846,7 @@ void WriteModel (const ArgParcer::Inputs& i_inputs,
 {
   std::ofstream outfile (i_fileName, std::ofstream::binary);
   SimpleWriteToFile(outfile, i_inputs.d_hashSize);
+  SimpleWriteToFile(outfile, LileParcer::hash_fn.getSize());
   SimpleWriteToFile(outfile, i_inputs.d_l1);
   SimpleWriteToFile(outfile, i_inputs.d_l2);
   SimpleWriteToFile(outfile, i_inputs.d_lossFunction);
@@ -844,6 +861,14 @@ bool ReadSimpleFromFile(std::ifstream& i_infile, T& o_value)
 {
   i_infile.read((char*)(&o_value), sizeof(T));
   return !i_infile.eof();
+}
+
+bool ReadSimpleFromFile(std::ifstream& i_infile, LileParcer::Feature& o_feature)
+{
+  o_feature.d_featureHash = 0;
+  i_infile.read((char*)(&o_feature.d_featureHash), (LileParcer::hash_fn.getSize() + 3) / 4);
+
+  return ReadSimpleFromFile(i_infile, o_feature.d_value);
 }
 
 bool ReadStringFromFile(std::ifstream& i_infile,
@@ -873,7 +898,7 @@ bool ReadVectorFromFile(std::ifstream& i_infile,
   for (size_t count = 0; count < size; ++count)
   {
     T value;
-    i_infile.read((char*)(&value), sizeof(T));
+    ReadSimpleFromFile(i_infile, value);
     if (i_infile.eof())
     {
       return false;
@@ -920,7 +945,9 @@ void ReadModel (ArgParcer::Inputs& o_inputs,
 {
   std::ifstream infile (i_fileName, std::ifstream::binary);
   ReadSimpleFromFile(infile, o_inputs.d_hashSize);
-  LileParcer::hash_fn.setSize(o_inputs.d_hashSize);
+  size_t bitSize;
+  ReadSimpleFromFile(infile, bitSize);
+  LileParcer::hash_fn.setSize(o_inputs.d_hashSize, bitSize);
 
   ReadSimpleFromFile(infile, o_inputs.d_l1);
   ReadSimpleFromFile(infile, o_inputs.d_l2);
