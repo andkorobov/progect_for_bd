@@ -812,7 +812,6 @@ void SimpleWriteToFile(std::ofstream& o_outfile, const LileParcer::Feature& i_fe
 void WriteStringToFile(std::ofstream& o_outfile, const std::string& i_str)
 {
   auto size = i_str.size();
-  o_outfile.write((char*)(&size), sizeof(size));
   o_outfile.write(i_str.c_str(), size + 1);
 }
 
@@ -874,15 +873,22 @@ bool ReadSimpleFromFile(std::ifstream& i_infile, LileParcer::Feature& o_feature)
 bool ReadStringFromFile(std::ifstream& i_infile,
 			std::string& o_str)
 {
-  size_t size;
-  i_infile.read((char*)(&size), sizeof(size));
-  if (i_infile.eof())
+  o_str = std::string();
+  while (!i_infile.eof())
   {
-    return false;
+    char c = 0;
+    i_infile.read(&c, 1);
+    if (c)
+    {
+      o_str.push_back(c);
+    }
+    else
+    {
+      return !i_infile.eof();
+    }
   }
-  o_str.resize(size);
-  i_infile.read(&o_str.front(), size + 1);
-  return !i_infile.eof();
+
+  return false;
 }
 
 template <class T>
